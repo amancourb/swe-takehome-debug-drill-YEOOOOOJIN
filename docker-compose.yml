@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: drill
+      POSTGRES_PASSWORD: drill
+      POSTGRES_DB: drill
+    ports:
+      # 5433 on the host on purpose: the other interview repo uses 5432,
+      # and both may be running at the same time.
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U drill -d drill"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
