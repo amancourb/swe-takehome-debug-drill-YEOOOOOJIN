@@ -33,14 +33,27 @@ class Worker:
     def claim_next_job(self) -> dict | None:
         """Take the oldest pending job off the queue, or return None if empty."""
         with self.conn.cursor() as cur:
+            # pick and claim in one statement so two workers can't claim the
+            # same job; SKIP LOCKED lets concurrent workers pass over each
+            # other's rows instead of waiting. `id = (...)`, not `in`, so the
+            # limit 1 is applied exactly once.
             cur.execute(
                 """
-                select id, payload
-                  from jobs
-                 where status = 'pending'
-                 order by id
-                 limit 1
-                """
+                update jobs
+                   set status = 'running',
+                       claimed_by = %s,
+                       updated_at = now()
+                 where id = (
+                       select id
+                         from jobs
+                        where status = 'pending'
+                        order by id
+                        limit 1
+                          for update skip locked
+                       )
+                returning id, payload
+                """,
+                (self.name,),
             )
             row = cur.fetchone()
             if row is None:
@@ -48,19 +61,8 @@ class Worker:
 
             job_id, payload = row
 
-            # load this job's execution settings before we start
-            config = self.load_config(job_id)
-
-            cur.execute(
-                """
-                update jobs
-                   set status = 'running',
-                       claimed_by = %s,
-                       updated_at = now()
-                 where id = %s
-                """,
-                (self.name, job_id),
-            )
+        # load this job's execution settings before we start
+        config = self.load_config(job_id)
 
         return {"id": job_id, "payload": payload, "config": config}
 
